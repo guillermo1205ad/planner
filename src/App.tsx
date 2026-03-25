@@ -90,6 +90,7 @@ function App() {
 
   const [banner, setBanner] = useState<{ type: BannerType; text: string } | null>(null);
   const bannerTimer = useRef<number | null>(null);
+  const silentConnectTried = useRef(false);
 
   const showBanner = (type: BannerType, text: string): void => {
     setBanner({ type, text });
@@ -131,7 +132,7 @@ function App() {
   const googleConfigured = GOOGLE_CLIENT_ID.length > 0;
   const googleConnected = googleAccessToken.length > 0;
 
-  const connectGoogle = async (): Promise<void> => {
+  const connectGoogle = async (prompt: '' | 'consent' = 'consent'): Promise<void> => {
     if (!googleConfigured) {
       showBanner('error', 'Falta VITE_GOOGLE_CLIENT_ID en .env');
       return;
@@ -139,10 +140,15 @@ function App() {
 
     setIntegrationBusy(true);
     try {
-      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID, 'consent');
+      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID, prompt);
       setGoogleAccessToken(token);
-      showBanner('success', 'Google Calendar conectado.');
+      if (prompt === 'consent') {
+        showBanner('success', 'Google Calendar conectado.');
+      }
     } catch (error) {
+      if (prompt === '') {
+        return;
+      }
       const message = error instanceof Error ? error.message : 'No se pudo conectar Google Calendar.';
       showBanner('error', message);
     } finally {
@@ -150,10 +156,17 @@ function App() {
     }
   };
 
-  const disconnectGoogle = (): void => {
-    setGoogleAccessToken('');
-    showBanner('info', 'Google Calendar desconectado.');
-  };
+  useEffect(() => {
+    if (!googleConfigured || googleConnected || integrationBusy) {
+      return;
+    }
+    if (silentConnectTried.current) {
+      return;
+    }
+
+    silentConnectTried.current = true;
+    void connectGoogle('');
+  }, [googleConfigured, googleConnected, integrationBusy]);
 
   const syncDayWithGoogle = async (date: string, plan: DayPlan): Promise<boolean> => {
     if (!googleConnected) {
@@ -271,32 +284,6 @@ function App() {
 
       {banner ? <div className={`banner banner-${banner.type}`}>{banner.text}</div> : null}
 
-      <section className="integration-grid">
-        <article className="integration-card">
-          <div className="integration-header">
-            <h2>Google Calendar</h2>
-            <span className={`status-dot ${googleConnected ? 'online' : googleConfigured ? 'pending' : 'offline'}`}>
-              {googleConnected ? 'Conectado' : googleConfigured ? 'Listo para conectar' : 'Sin configurar'}
-            </span>
-          </div>
-          <p>La configuración de Google viene desde `.env` (no editable en pantalla).</p>
-          <div className="integration-actions">
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => void connectGoogle()}
-              disabled={!googleConfigured || integrationBusy}
-            >
-              {integrationBusy ? 'Conectando...' : 'Conectar Google'}
-            </button>
-            <button type="button" className="button button-ghost" onClick={disconnectGoogle} disabled={!googleConnected}>
-              Desconectar
-            </button>
-          </div>
-          <small className="hint">Variables usadas: `VITE_GOOGLE_CLIENT_ID` y `VITE_GOOGLE_CALENDAR_ID`.</small>
-        </article>
-      </section>
-
       <section className="control-panel">
         <div className="level-switch">
           {levels.map((level) => (
@@ -357,6 +344,9 @@ function App() {
             </div>
             <div className="day-actions-row">
               <div className="day-toggle-group">
+                <p className="hint">
+                  Google Calendar: {googleConnected ? 'Conectado' : googleConfigured ? 'No conectado' : 'Sin configurar'}
+                </p>
                 <label className="checkbox">
                   <input
                     type="checkbox"
@@ -368,6 +358,16 @@ function App() {
                 </label>
               </div>
               <div className="actions-inline">
+                {!googleConnected && googleConfigured ? (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => void connectGoogle('consent')}
+                    disabled={integrationBusy || savingDay}
+                  >
+                    {integrationBusy ? 'Conectando...' : 'Conectar Google'}
+                  </button>
+                ) : null}
                 <button
                   type="button"
                   className="button button-secondary"
