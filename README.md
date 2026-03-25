@@ -16,7 +16,7 @@ Modo actual: **100% frontend**, compatible con GitHub Pages.
   - Tareas urgentes
   - Notas
 - Persistencia local en navegador (`localStorage`)
-- Integración Google Calendar desde frontend (OAuth en navegador)
+- Integración Google Calendar desde frontend (OAuth en navegador + sincronización de tareas)
 - Integración Telegram en modo compartir (abre Telegram con texto prellenado)
 
 ## Limitación importante
@@ -36,6 +36,7 @@ npm run dev
 2. En la app, pega tu `Google Client ID`.
 3. Deja `Calendar ID` en `primary` (o usa otro si lo necesitas).
 4. Pulsa `Conectar Google`.
+5. En vista diaria usa `Sincronizar Google` o activa `Sincronizar Google al guardar`.
 
 En Google Cloud agrega como **Authorized JavaScript origin**:
 

@@ -433,6 +433,11 @@ input:focus {
   flex-wrap: wrap;
 }
 
+.day-toggle-group {
+  display: grid;
+  gap: 0.35rem;
+}
+
 .checkbox {
   display: inline-flex;
   align-items: center;

@@ -9,7 +9,7 @@ import {
   weekRangeFromInput,
   weekToInput,
 } from './lib/date';
-import { fetchGoogleEvents, requestGoogleAccessToken } from './lib/googleBrowser';
+import { fetchGoogleEvents, requestGoogleAccessToken, syncDayPlanToGoogleCalendar } from './lib/googleBrowser';
 import { getDayPlan, getRangeSummary, getSettings, saveSettings, upsertDayPlan } from './lib/localStore';
 import { DayPlan, DaySummary, GooglePlannerEvent, PlannerLevel, PlannerSettings, SectionKey } from './types';
 
@@ -141,6 +141,7 @@ function App() {
   const [settings, setSettings] = useState<PlannerSettings>(getSettings());
   const [googleAccessToken, setGoogleAccessToken] = useState('');
   const [shareOnSave, setShareOnSave] = useState(false);
+  const [syncGoogleOnSave, setSyncGoogleOnSave] = useState(true);
   const [integrationBusy, setIntegrationBusy] = useState<'google' | 'telegram' | null>(null);
   const [loadingRange, setLoadingRange] = useState(false);
   const [savingDay, setSavingDay] = useState(false);
@@ -306,6 +307,10 @@ function App() {
     await loadRange(activeRange.start, activeRange.end);
     showBanner('success', 'Plan diario guardado localmente.');
 
+    if (syncGoogleOnSave && googleConnected) {
+      await syncDayWithGoogle(dayValue, dayPlan);
+    }
+
     if (shareOnSave) {
       openTelegramShare(buildDailyMessage(settings.telegramMessageTemplate, dayValue, dayPlan));
     }
@@ -325,6 +330,34 @@ function App() {
     openTelegramShare(buildDailyMessage(settings.telegramMessageTemplate, dayValue, dayPlan));
     showBanner('info', 'Se abrió Telegram con el resumen diario.');
     setIntegrationBusy(null);
+  };
+
+  const syncDayWithGoogle = async (date: string, plan: DayPlan): Promise<boolean> => {
+    if (!googleConnected) {
+      showBanner('info', 'Conecta Google Calendar para sincronizar.');
+      return false;
+    }
+
+    try {
+      const result = await syncDayPlanToGoogleCalendar(googleAccessToken, settings.googleCalendarId, date, plan);
+      showBanner(
+        'success',
+        `Google sincronizado: ${result.created} creados, ${result.updated} actualizados, ${result.removed} eliminados.`,
+      );
+      await loadRange(activeRange.start, activeRange.end);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo sincronizar con Google Calendar.';
+
+      if (message === 'UNAUTHORIZED') {
+        setGoogleAccessToken('');
+        showBanner('info', 'Tu sesión de Google expiró. Reconecta Google y vuelve a sincronizar.');
+      } else {
+        showBanner('error', message);
+      }
+
+      return false;
+    }
   };
 
   const jumpToDay = (date: string): void => {
@@ -556,13 +589,32 @@ function App() {
               <p>Organiza ejecución y seguimiento en bloques claros para operar con foco.</p>
             </div>
             <div className="day-actions-row">
-              <label className="checkbox">
-                <input type="checkbox" checked={shareOnSave} onChange={(event) => setShareOnSave(event.target.checked)} />
-                Abrir Telegram al guardar
-              </label>
+              <div className="day-toggle-group">
+                <label className="checkbox">
+                  <input type="checkbox" checked={shareOnSave} onChange={(event) => setShareOnSave(event.target.checked)} />
+                  Abrir Telegram al guardar
+                </label>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={syncGoogleOnSave}
+                    onChange={(event) => setSyncGoogleOnSave(event.target.checked)}
+                    disabled={!googleConnected}
+                  />
+                  Sincronizar Google al guardar
+                </label>
+              </div>
               <div className="actions-inline">
                 <button type="button" className="button button-secondary" onClick={sendDailySummary}>
                   Compartir resumen
+                </button>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  onClick={() => void syncDayWithGoogle(dayValue, dayPlan)}
+                  disabled={!googleConnected || savingDay}
+                >
+                  Sincronizar Google
                 </button>
                 <button type="button" className="button button-primary" onClick={() => void saveDay()} disabled={savingDay}>
                   {savingDay ? 'Guardando...' : 'Guardar día'}
