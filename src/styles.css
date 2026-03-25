@@ -118,7 +118,7 @@ h1 {
 .integration-grid {
   margin-top: 1.25rem;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 1rem;
 }
 
@@ -307,6 +307,51 @@ input:focus {
   margin: 0.8rem 0;
   color: var(--text-soft);
   font-size: 0.92rem;
+}
+
+.task-feed {
+  margin: 0.9rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.task-item {
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: rgba(252, 254, 255, 0.96);
+  padding: 0.7rem 0.8rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.task-main {
+  min-width: 0;
+}
+
+.task-main p {
+  margin: 0.25rem 0 0;
+  color: #334155;
+  word-break: break-word;
+}
+
+.task-date {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: #5d6d8a;
+  margin-right: 0.5rem;
+}
+
+.task-tag {
+  display: inline-block;
+  font-size: 0.72rem;
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.12);
+  border-radius: 999px;
+  padding: 0.15rem 0.45rem;
 }
 
 .month-grid {
@@ -624,6 +669,11 @@ input:focus {
   .compose-row,
   .item-list li {
     grid-template-columns: 1fr;
+  }
+
+  .task-item {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 

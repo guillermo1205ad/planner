@@ -1,11 +1,10 @@
 import { eachDayOfInterval, format } from 'date-fns';
-import { DayPlan, DaySummary, PlannerSettings, StoredDayPlan } from '../types';
+import { DayPlan, DaySummary, PlannedTaskItem, StoredDayPlan } from '../types';
 
 const STORE_KEY = 'planner_store_v2';
 
 interface PlannerStore {
   days: Record<string, StoredDayPlan>;
-  settings: PlannerSettings;
 }
 
 const defaultPlan = (): DayPlan => ({
@@ -15,15 +14,8 @@ const defaultPlan = (): DayPlan => ({
   notes: [],
 });
 
-const defaultSettings = (): PlannerSettings => ({
-  googleClientId: '',
-  googleCalendarId: 'primary',
-  telegramMessageTemplate: 'Resumen del día',
-});
-
 const defaultStore = (): PlannerStore => ({
   days: {},
-  settings: defaultSettings(),
 });
 
 const normalizeLines = (values: string[]): string[] =>
@@ -47,10 +39,6 @@ const safeParseStore = (raw: string | null): PlannerStore => {
     const parsed = JSON.parse(raw) as Partial<PlannerStore>;
     return {
       days: parsed.days ?? {},
-      settings: {
-        ...defaultSettings(),
-        ...(parsed.settings ?? {}),
-      },
     };
   } catch {
     return defaultStore();
@@ -121,14 +109,36 @@ export const getRangeSummary = (start: string, end: string): Record<string, DayS
   return summary;
 };
 
-export const getSettings = (): PlannerSettings => readStore().settings;
-
-export const saveSettings = (nextSettings: PlannerSettings): PlannerSettings => {
+export const listRangeTasks = (start: string, end: string): PlannedTaskItem[] => {
   const store = readStore();
-  store.settings = {
-    ...defaultSettings(),
-    ...nextSettings,
-  };
-  writeStore(store);
-  return store.settings;
+  const dates = eachDayOfInterval({
+    start: new Date(`${start}T00:00:00`),
+    end: new Date(`${end}T00:00:00`),
+  });
+
+  const items: PlannedTaskItem[] = [];
+
+  for (const date of dates) {
+    const key = format(date, 'yyyy-MM-dd');
+    const plan = store.days[key];
+
+    if (!plan) {
+      continue;
+    }
+
+    for (const text of plan.tasksForToday) {
+      items.push({ date: key, section: 'tasksForToday', text });
+    }
+    for (const text of plan.dontForget) {
+      items.push({ date: key, section: 'dontForget', text });
+    }
+    for (const text of plan.urgentTasks) {
+      items.push({ date: key, section: 'urgentTasks', text });
+    }
+    for (const text of plan.notes) {
+      items.push({ date: key, section: 'notes', text });
+    }
+  }
+
+  return items;
 };

@@ -9,7 +9,6 @@ export const dayPlanSchema = z.object({
 
 export const updateDaySchema = z.object({
   plan: dayPlanSchema,
-  notifyTelegram: z.boolean().optional().default(false),
 });
 
 export type DayPlan = z.infer<typeof dayPlanSchema>;

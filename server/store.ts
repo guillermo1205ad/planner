@@ -126,15 +126,3 @@ export const getRangeSummary = (start: string, end: string): Record<string, DayS
 
   return summary;
 };
-
-export const createTelegramSummary = (date: string, plan: DayPlan): string => {
-  const lines = [
-    `Plan del ${date}`,
-    `Tareas para hoy: ${plan.tasksForToday.length}`,
-    `No olvidar: ${plan.dontForget.length}`,
-    `Urgentes: ${plan.urgentTasks.length}`,
-    `Notas: ${plan.notes.length}`,
-  ];
-
-  return lines.join('\n');
-};

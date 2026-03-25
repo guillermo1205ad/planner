@@ -1,21 +1,16 @@
 import { format, parseISO } from 'date-fns';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  buildMonthGrid,
-  dateToInput,
-  monthRangeFromInput,
-  monthToInput,
-  weekFromInput,
-  weekRangeFromInput,
-  weekToInput,
-} from './lib/date';
-import { fetchGoogleEvents, requestGoogleAccessToken, syncDayPlanToGoogleCalendar } from './lib/googleBrowser';
-import { getDayPlan, getRangeSummary, getSettings, saveSettings, upsertDayPlan } from './lib/localStore';
-import { DayPlan, DaySummary, GooglePlannerEvent, PlannerLevel, PlannerSettings, SectionKey } from './types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { dateToInput, monthRangeFromInput, monthToInput, weekRangeFromInput, weekToInput } from './lib/date';
+import { requestGoogleAccessToken, syncDayPlanToGoogleCalendar } from './lib/googleBrowser';
+import { getDayPlan, listRangeTasks, upsertDayPlan } from './lib/localStore';
+import { DayPlan, PlannedTaskItem, PlannerLevel, SectionKey } from './types';
+
+const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
+const GOOGLE_CALENDAR_ID = (import.meta.env.VITE_GOOGLE_CALENDAR_ID as string | undefined)?.trim() || 'primary';
 
 const levels: Array<{ id: PlannerLevel; title: string; subtitle: string }> = [
-  { id: 'month', title: 'Mensual', subtitle: 'Panorama de carga y eventos' },
-  { id: 'week', title: 'Semanal', subtitle: 'Prioridades por bloque de 7 días' },
+  { id: 'month', title: 'Mensual', subtitle: 'Listado de tareas del mes' },
+  { id: 'week', title: 'Semanal', subtitle: 'Listado de tareas de la semana' },
   { id: 'day', title: 'Diario', subtitle: 'Ejecución detallada del día' },
 ];
 
@@ -56,7 +51,12 @@ const sections: Array<{
   },
 ];
 
-const weekdays = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+const sectionLabel: Record<SectionKey, string> = {
+  tasksForToday: 'Tarea de hoy',
+  dontForget: 'No olvidar',
+  urgentTasks: 'Urgente',
+  notes: 'Nota',
+};
 
 type BannerType = 'success' | 'error' | 'info';
 
@@ -67,66 +67,6 @@ const clonePlan = (plan: DayPlan): DayPlan => ({
   notes: [...plan.notes],
 });
 
-const buildDailyMessage = (title: string, date: string, plan: DayPlan): string =>
-  [
-    `${title.trim() || 'Resumen del día'} ${date}`,
-    `Tareas para hoy (${plan.tasksForToday.length}): ${plan.tasksForToday.join(' | ') || 'sin items'}`,
-    `No olvidar (${plan.dontForget.length}): ${plan.dontForget.join(' | ') || 'sin items'}`,
-    `Urgentes (${plan.urgentTasks.length}): ${plan.urgentTasks.join(' | ') || 'sin items'}`,
-    `Notas (${plan.notes.length}): ${plan.notes.join(' | ') || 'sin items'}`,
-  ].join('\n');
-
-const eventTime = (event: GooglePlannerEvent): string => {
-  if (event.allDay) {
-    return 'Todo el día';
-  }
-
-  const parsed = parseISO(event.start);
-  if (Number.isNaN(parsed.getTime())) {
-    return '';
-  }
-
-  return format(parsed, 'HH:mm');
-};
-
-const toDateKey = (value: string): string => {
-  const source = value.length > 10 ? value : `${value}T00:00:00`;
-  const parsed = parseISO(source);
-  return Number.isNaN(parsed.getTime()) ? value.slice(0, 10) : format(parsed, 'yyyy-MM-dd');
-};
-
-const withGoogleCounts = (
-  summary: Record<string, DaySummary>,
-  eventsByDate: Record<string, GooglePlannerEvent[]>,
-): Record<string, DaySummary> => {
-  const next = { ...summary };
-
-  Object.entries(eventsByDate).forEach(([date, events]) => {
-    if (!next[date]) {
-      next[date] = {
-        tasksForToday: 0,
-        dontForget: 0,
-        urgentTasks: 0,
-        notes: 0,
-        googleEvents: 0,
-        total: 0,
-      };
-    }
-
-    next[date] = {
-      ...next[date],
-      googleEvents: events.length,
-    };
-  });
-
-  return next;
-};
-
-const openTelegramShare = (text: string): void => {
-  const shareUrl = `https://t.me/share/url?url=&text=${encodeURIComponent(text)}`;
-  window.open(shareUrl, '_blank', 'noopener,noreferrer');
-};
-
 function App() {
   const initialDate = useMemo(() => new Date(), []);
   const [activeLevel, setActiveLevel] = useState<PlannerLevel>('month');
@@ -135,16 +75,11 @@ function App() {
   const [dayValue, setDayValue] = useState(dateToInput(initialDate));
 
   const [dayPlan, setDayPlan] = useState<DayPlan>(clonePlan(getDayPlan(dayValue)));
-  const [summaryByDate, setSummaryByDate] = useState<Record<string, DaySummary>>({});
-  const [eventsByDate, setEventsByDate] = useState<Record<string, GooglePlannerEvent[]>>({});
-
-  const [settings, setSettings] = useState<PlannerSettings>(getSettings());
   const [googleAccessToken, setGoogleAccessToken] = useState('');
-  const [shareOnSave, setShareOnSave] = useState(false);
   const [syncGoogleOnSave, setSyncGoogleOnSave] = useState(true);
-  const [integrationBusy, setIntegrationBusy] = useState<'google' | 'telegram' | null>(null);
-  const [loadingRange, setLoadingRange] = useState(false);
+  const [integrationBusy, setIntegrationBusy] = useState(false);
   const [savingDay, setSavingDay] = useState(false);
+  const [storeVersion, setStoreVersion] = useState(0);
 
   const [drafts, setDrafts] = useState<Record<SectionKey, string>>({
     tasksForToday: '',
@@ -156,7 +91,7 @@ function App() {
   const [banner, setBanner] = useState<{ type: BannerType; text: string } | null>(null);
   const bannerTimer = useRef<number | null>(null);
 
-  const showBanner = useCallback((type: BannerType, text: string) => {
+  const showBanner = (type: BannerType, text: string): void => {
     setBanner({ type, text });
 
     if (bannerTimer.current) {
@@ -166,7 +101,7 @@ function App() {
     bannerTimer.current = window.setTimeout(() => {
       setBanner(null);
     }, 5000);
-  }, []);
+  };
 
   useEffect(
     () => () => {
@@ -177,92 +112,74 @@ function App() {
     [],
   );
 
-  const activeRange = useMemo(() => {
-    if (activeLevel === 'month') {
-      return monthRangeFromInput(monthValue);
-    }
+  useEffect(() => {
+    setDayPlan(clonePlan(getDayPlan(dayValue)));
+  }, [dayValue, storeVersion]);
 
-    if (activeLevel === 'week') {
-      return weekRangeFromInput(weekValue);
-    }
+  const monthRange = useMemo(() => monthRangeFromInput(monthValue), [monthValue]);
+  const weekRange = useMemo(() => weekRangeFromInput(weekValue), [weekValue]);
 
-    return { start: dayValue, end: dayValue };
-  }, [activeLevel, monthValue, weekValue, dayValue]);
-
-  const loadRange = useCallback(
-    async (start: string, end: string) => {
-      setLoadingRange(true);
-
-      const localSummary = getRangeSummary(start, end);
-      let nextEventsByDate: Record<string, GooglePlannerEvent[]> = {};
-
-      if (googleAccessToken) {
-        try {
-          const events = await fetchGoogleEvents(googleAccessToken, settings.googleCalendarId, start, end);
-          nextEventsByDate = events.reduce<Record<string, GooglePlannerEvent[]>>((accumulator, event) => {
-            const key = toDateKey(event.start);
-            if (!accumulator[key]) {
-              accumulator[key] = [];
-            }
-            accumulator[key].push(event);
-            return accumulator;
-          }, {});
-        } catch (error) {
-          const message = error instanceof Error ? error.message : 'No se pudo leer Google Calendar.';
-
-          if (message === 'UNAUTHORIZED') {
-            setGoogleAccessToken('');
-            showBanner('info', 'Tu sesión de Google expiró. Pulsa "Conectar Google" nuevamente.');
-          } else {
-            showBanner('error', message);
-          }
-        }
-      }
-
-      setEventsByDate(nextEventsByDate);
-      setSummaryByDate(withGoogleCounts(localSummary, nextEventsByDate));
-      setLoadingRange(false);
-    },
-    [googleAccessToken, settings.googleCalendarId, showBanner],
+  const monthTaskList = useMemo(
+    () => listRangeTasks(monthRange.start, monthRange.end),
+    [monthRange.end, monthRange.start, storeVersion],
+  );
+  const weekTaskList = useMemo(
+    () => listRangeTasks(weekRange.start, weekRange.end),
+    [weekRange.end, weekRange.start, storeVersion],
   );
 
-  useEffect(() => {
-    const next = getDayPlan(dayValue);
-    setDayPlan(clonePlan(next));
-  }, [dayValue]);
-
-  useEffect(() => {
-    void loadRange(activeRange.start, activeRange.end);
-  }, [activeRange.end, activeRange.start, loadRange]);
-
-  const persistSettings = (next: PlannerSettings): void => {
-    setSettings(saveSettings(next));
-  };
-
-  const updateSettings = (field: keyof PlannerSettings, value: string): void => {
-    const next = { ...settings, [field]: value };
-    persistSettings(next);
-  };
+  const googleConfigured = GOOGLE_CLIENT_ID.length > 0;
+  const googleConnected = googleAccessToken.length > 0;
 
   const connectGoogle = async (): Promise<void> => {
-    setIntegrationBusy('google');
+    if (!googleConfigured) {
+      showBanner('error', 'Falta VITE_GOOGLE_CLIENT_ID en .env');
+      return;
+    }
+
+    setIntegrationBusy(true);
     try {
-      const token = await requestGoogleAccessToken(settings.googleClientId, 'consent');
+      const token = await requestGoogleAccessToken(GOOGLE_CLIENT_ID, 'consent');
       setGoogleAccessToken(token);
-      showBanner('success', 'Google Calendar conectado desde el navegador.');
-      await loadRange(activeRange.start, activeRange.end);
+      showBanner('success', 'Google Calendar conectado.');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo conectar Google Calendar.';
       showBanner('error', message);
     } finally {
-      setIntegrationBusy(null);
+      setIntegrationBusy(false);
     }
   };
 
   const disconnectGoogle = (): void => {
     setGoogleAccessToken('');
-    showBanner('info', 'Google Calendar desconectado en esta sesión.');
-    void loadRange(activeRange.start, activeRange.end);
+    showBanner('info', 'Google Calendar desconectado.');
+  };
+
+  const syncDayWithGoogle = async (date: string, plan: DayPlan): Promise<boolean> => {
+    if (!googleConnected) {
+      showBanner('info', 'Conecta Google Calendar para sincronizar.');
+      return false;
+    }
+
+    try {
+      const result = await syncDayPlanToGoogleCalendar(googleAccessToken, GOOGLE_CALENDAR_ID, date, plan);
+      showBanner(
+        'success',
+        `Google sincronizado: ${result.created} creados, ${result.updated} actualizados, ${result.removed} eliminados.`,
+      );
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo sincronizar con Google Calendar.';
+
+      if (message === 'UNAUTHORIZED') {
+        setGoogleAccessToken('');
+        showBanner('info', 'Tu sesión expiró. Conecta Google nuevamente.');
+      } else {
+        showBanner('error', message);
+      }
+
+      return false;
+    }
   };
 
   const addItem = (section: SectionKey): void => {
@@ -304,60 +221,14 @@ function App() {
     setSavingDay(true);
     const updated = upsertDayPlan(dayValue, dayPlan);
     setDayPlan(clonePlan(updated));
-    await loadRange(activeRange.start, activeRange.end);
+    setStoreVersion((previous) => previous + 1);
     showBanner('success', 'Plan diario guardado localmente.');
 
     if (syncGoogleOnSave && googleConnected) {
       await syncDayWithGoogle(dayValue, dayPlan);
     }
 
-    if (shareOnSave) {
-      openTelegramShare(buildDailyMessage(settings.telegramMessageTemplate, dayValue, dayPlan));
-    }
-
     setSavingDay(false);
-  };
-
-  const sendTelegramTest = (): void => {
-    setIntegrationBusy('telegram');
-    openTelegramShare('Mensaje de prueba desde Planner en GitHub Pages.');
-    showBanner('info', 'Se abrió Telegram para compartir el mensaje.');
-    setIntegrationBusy(null);
-  };
-
-  const sendDailySummary = (): void => {
-    setIntegrationBusy('telegram');
-    openTelegramShare(buildDailyMessage(settings.telegramMessageTemplate, dayValue, dayPlan));
-    showBanner('info', 'Se abrió Telegram con el resumen diario.');
-    setIntegrationBusy(null);
-  };
-
-  const syncDayWithGoogle = async (date: string, plan: DayPlan): Promise<boolean> => {
-    if (!googleConnected) {
-      showBanner('info', 'Conecta Google Calendar para sincronizar.');
-      return false;
-    }
-
-    try {
-      const result = await syncDayPlanToGoogleCalendar(googleAccessToken, settings.googleCalendarId, date, plan);
-      showBanner(
-        'success',
-        `Google sincronizado: ${result.created} creados, ${result.updated} actualizados, ${result.removed} eliminados.`,
-      );
-      await loadRange(activeRange.start, activeRange.end);
-      return true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo sincronizar con Google Calendar.';
-
-      if (message === 'UNAUTHORIZED') {
-        setGoogleAccessToken('');
-        showBanner('info', 'Tu sesión de Google expiró. Reconecta Google y vuelve a sincronizar.');
-      } else {
-        showBanner('error', message);
-      }
-
-      return false;
-    }
   };
 
   const jumpToDay = (date: string): void => {
@@ -365,22 +236,28 @@ function App() {
     setActiveLevel('day');
   };
 
-  const monthCells = useMemo(() => buildMonthGrid(monthValue), [monthValue]);
-  const weekDays = useMemo(() => weekFromInput(weekValue), [weekValue]);
-
-  const weekLabel = useMemo(() => {
-    const first = weekDays[0];
-    const last = weekDays[6];
-
-    if (!first || !last) {
-      return '';
+  const renderTaskList = (tasks: PlannedTaskItem[], emptyText: string) => {
+    if (tasks.length === 0) {
+      return <p className="loading">{emptyText}</p>;
     }
 
-    return `${format(first, 'dd MMM')} - ${format(last, 'dd MMM yyyy')}`;
-  }, [weekDays]);
-
-  const googleConfigured = settings.googleClientId.trim().length > 0;
-  const googleConnected = googleAccessToken.length > 0;
+    return (
+      <ul className="task-feed">
+        {tasks.map((task, index) => (
+          <li key={`${task.date}-${task.section}-${task.text}-${index}`} className="task-item">
+            <div className="task-main">
+              <span className="task-date">{format(parseISO(`${task.date}T00:00:00`), 'dd MMM')}</span>
+              <span className="task-tag">{sectionLabel[task.section]}</span>
+              <p>{task.text}</p>
+            </div>
+            <button type="button" className="button button-ghost" onClick={() => jumpToDay(task.date)}>
+              Abrir día
+            </button>
+          </li>
+        ))}
+      </ul>
+    );
+  };
 
   return (
     <div className="app-shell">
@@ -388,9 +265,7 @@ function App() {
         <div>
           <p className="eyebrow">Planificador Profesional</p>
           <h1>Mensual, semanal y diario en una sola operación.</h1>
-          <p className="lead">
-            Modo GitHub Pages: planificación local, Google Calendar desde navegador y envío a Telegram por enlace.
-          </p>
+          <p className="lead">Planificación local y sincronización con Google Calendar.</p>
         </div>
       </header>
 
@@ -404,70 +279,21 @@ function App() {
               {googleConnected ? 'Conectado' : googleConfigured ? 'Listo para conectar' : 'Sin configurar'}
             </span>
           </div>
-          <p>Conecta Google desde frontend para mostrar eventos en mes, semana y día.</p>
-          <div className="field">
-            <label htmlFor="google-client-id">Google Client ID</label>
-            <input
-              id="google-client-id"
-              type="text"
-              value={settings.googleClientId}
-              onChange={(event) => updateSettings('googleClientId', event.target.value)}
-              placeholder="xxxx.apps.googleusercontent.com"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="google-calendar-id">Calendar ID</label>
-            <input
-              id="google-calendar-id"
-              type="text"
-              value={settings.googleCalendarId}
-              onChange={(event) => updateSettings('googleCalendarId', event.target.value)}
-              placeholder="primary"
-            />
-          </div>
+          <p>La configuración de Google viene desde `.env` (no editable en pantalla).</p>
           <div className="integration-actions">
             <button
               type="button"
               className="button button-primary"
               onClick={() => void connectGoogle()}
-              disabled={!googleConfigured || integrationBusy === 'google'}
+              disabled={!googleConfigured || integrationBusy}
             >
-              {integrationBusy === 'google' ? 'Conectando...' : 'Conectar Google'}
+              {integrationBusy ? 'Conectando...' : 'Conectar Google'}
             </button>
             <button type="button" className="button button-ghost" onClick={disconnectGoogle} disabled={!googleConnected}>
               Desconectar
             </button>
           </div>
-          <small className="hint">En Google OAuth agrega tu dominio de GitHub Pages como origen autorizado.</small>
-        </article>
-
-        <article className="integration-card">
-          <div className="integration-header">
-            <h2>Telegram</h2>
-            <span className="status-dot online">Modo Pages</span>
-          </div>
-          <p>Sin backend: se abre Telegram con mensaje prellenado para que tú lo envíes al chat.</p>
-          <div className="field">
-            <label htmlFor="telegram-template">Título del resumen</label>
-            <input
-              id="telegram-template"
-              type="text"
-              value={settings.telegramMessageTemplate}
-              onChange={(event) => updateSettings('telegramMessageTemplate', event.target.value)}
-              placeholder="Resumen del día"
-            />
-          </div>
-          <div className="integration-actions">
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={sendTelegramTest}
-              disabled={integrationBusy === 'telegram'}
-            >
-              Mensaje de prueba
-            </button>
-          </div>
-          <small className="hint">No se almacenan tokens de Telegram en el frontend por seguridad.</small>
+          <small className="hint">Variables usadas: `VITE_GOOGLE_CLIENT_ID` y `VITE_GOOGLE_CALENDAR_ID`.</small>
         </article>
       </section>
 
@@ -506,79 +332,20 @@ function App() {
         {activeLevel === 'month' ? (
           <div className="view-block">
             <div className="view-title">
-              <h2>Vista mensual · {monthValue}</h2>
-              <p>Carga de tareas y eventos por día. Haz clic en cualquier fecha para abrir su vista diaria.</p>
+              <h2>Planificación mensual · {monthValue}</h2>
+              <p>Listado de todo lo pendiente para este mes.</p>
             </div>
-            {loadingRange ? <p className="loading">Cargando resumen mensual...</p> : null}
-            <div className="month-grid">
-              {weekdays.map((day) => (
-                <div key={day} className="weekday">
-                  {day}
-                </div>
-              ))}
-              {monthCells.map((cell) => {
-                const summary = summaryByDate[cell.dateKey];
-                return (
-                  <button
-                    key={cell.dateKey}
-                    type="button"
-                    className={`day-cell ${cell.inCurrentMonth ? '' : 'outside'} ${dayValue === cell.dateKey ? 'selected' : ''}`}
-                    onClick={() => jumpToDay(cell.dateKey)}
-                  >
-                    <span className="day-number">{format(cell.date, 'd')}</span>
-                    <div className="metrics">
-                      <span>Hoy {summary?.tasksForToday ?? 0}</span>
-                      <span>Urgente {summary?.urgentTasks ?? 0}</span>
-                      <span>Google {summary?.googleEvents ?? 0}</span>
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            {renderTaskList(monthTaskList, 'No hay tareas registradas este mes.')}
           </div>
         ) : null}
 
         {activeLevel === 'week' ? (
           <div className="view-block">
             <div className="view-title">
-              <h2>Vista semanal · {weekLabel}</h2>
-              <p>Distribución detallada de prioridades más eventos sincronizados de Google Calendar.</p>
+              <h2>Planificación semanal · {weekRange.start} a {weekRange.end}</h2>
+              <p>Listado de tareas pendientes para esta semana.</p>
             </div>
-            {loadingRange ? <p className="loading">Cargando resumen semanal...</p> : null}
-            <div className="week-cards">
-              {weekDays.map((day) => {
-                const dateKey = dateToInput(day);
-                const summary = summaryByDate[dateKey];
-                const events = eventsByDate[dateKey] ?? [];
-
-                return (
-                  <article className="week-card" key={dateKey}>
-                    <header>
-                      <h3>{format(day, "EEEE d 'de' MMMM")}</h3>
-                      <button type="button" className="button button-ghost" onClick={() => jumpToDay(dateKey)}>
-                        Abrir día
-                      </button>
-                    </header>
-                    <div className="week-metrics">
-                      <span>Hoy: {summary?.tasksForToday ?? 0}</span>
-                      <span>No olvidar: {summary?.dontForget ?? 0}</span>
-                      <span>Urgentes: {summary?.urgentTasks ?? 0}</span>
-                      <span>Notas: {summary?.notes ?? 0}</span>
-                      <span>Google: {summary?.googleEvents ?? 0}</span>
-                    </div>
-                    <ul className="event-list">
-                      {events.length === 0 ? <li className="empty-line">Sin eventos de Google Calendar.</li> : null}
-                      {events.map((event) => (
-                        <li key={event.id}>
-                          <span>{event.title}</span>
-                          <small>{eventTime(event)}</small>
-                        </li>
-                      ))}
-                    </ul>
-                  </article>
-                );
-              })}
-            </div>
+            {renderTaskList(weekTaskList, 'No hay tareas registradas esta semana.')}
           </div>
         ) : null}
 
@@ -591,10 +358,6 @@ function App() {
             <div className="day-actions-row">
               <div className="day-toggle-group">
                 <label className="checkbox">
-                  <input type="checkbox" checked={shareOnSave} onChange={(event) => setShareOnSave(event.target.checked)} />
-                  Abrir Telegram al guardar
-                </label>
-                <label className="checkbox">
                   <input
                     type="checkbox"
                     checked={syncGoogleOnSave}
@@ -605,9 +368,6 @@ function App() {
                 </label>
               </div>
               <div className="actions-inline">
-                <button type="button" className="button button-secondary" onClick={sendDailySummary}>
-                  Compartir resumen
-                </button>
                 <button
                   type="button"
                   className="button button-secondary"

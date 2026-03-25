@@ -18,6 +18,4 @@ export const env = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
   googleRedirectUri: process.env.GOOGLE_REDIRECT_URI ?? 'http://localhost:8080/api/google/callback',
   googleCalendarId: process.env.GOOGLE_CALENDAR_ID ?? 'primary',
-  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN ?? '',
-  telegramChatId: process.env.TELEGRAM_CHAT_ID ?? '',
 };

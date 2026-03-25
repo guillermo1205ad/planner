@@ -30,8 +30,8 @@ export interface GooglePlannerEvent {
   allDay: boolean;
 }
 
-export interface PlannerSettings {
-  googleClientId: string;
-  googleCalendarId: string;
-  telegramMessageTemplate: string;
+export interface PlannedTaskItem {
+  date: string;
+  section: SectionKey;
+  text: string;
 }

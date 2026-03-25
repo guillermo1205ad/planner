@@ -5,8 +5,7 @@ import express from 'express';
 import { format, isAfter, parseISO } from 'date-fns';
 import { env } from './env.js';
 import { exchangeGoogleCode, fetchGoogleEvents, getGoogleAuthUrl, hasGoogleConfig, isGoogleConnected } from './google.js';
-import { createTelegramSummary, getDayPlan, getRangeSummary, isIsoDate, upsertDayPlan } from './store.js';
-import { hasTelegramConfig, isTelegramConnected, processTelegramUpdate, sendTelegramMessage, setTelegramWebhook } from './telegram.js';
+import { getDayPlan, getRangeSummary, isIsoDate, upsertDayPlan } from './store.js';
 import { updateDaySchema } from './types.js';
 
 const app = express();
@@ -26,10 +25,6 @@ app.get('/api/health', (_req, res) => {
     google: {
       configured: hasGoogleConfig(),
       connected: isGoogleConnected(),
-    },
-    telegram: {
-      configured: hasTelegramConfig(),
-      connected: isTelegramConnected(),
     },
   });
 });
@@ -63,21 +58,10 @@ app.put('/api/planner/day', async (req, res) => {
 
   const updated = upsertDayPlan(date, parsed.data.plan);
 
-  let notificationWarning: string | null = null;
-  if (parsed.data.notifyTelegram) {
-    try {
-      await sendTelegramMessage(createTelegramSummary(date, parsed.data.plan));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo enviar notificación a Telegram.';
-      notificationWarning = message;
-    }
-  }
-
   res.json({
     ok: true,
     date,
     plan: updated,
-    notificationWarning,
   });
 });
 
@@ -202,75 +186,6 @@ app.get('/api/google/events', async (req, res) => {
     const message = error instanceof Error ? error.message : 'No se pudieron obtener eventos de Google Calendar.';
     res.status(500).json(errorPayload(message));
   }
-});
-
-app.get('/api/telegram/status', (_req, res) => {
-  res.json({
-    ok: true,
-    configured: hasTelegramConfig(),
-    connected: isTelegramConnected(),
-  });
-});
-
-app.post('/api/telegram/test', async (req, res) => {
-  const message = String(req.body?.message ?? '').trim();
-
-  if (!message) {
-    res.status(400).json(errorPayload('Debes enviar un mensaje en body.message.'));
-    return;
-  }
-
-  try {
-    await sendTelegramMessage(message);
-    res.json({ ok: true });
-  } catch (error) {
-    const details = error instanceof Error ? error.message : 'No se pudo enviar mensaje de prueba.';
-    res.status(500).json(errorPayload(details));
-  }
-});
-
-app.post('/api/telegram/notify', async (req, res) => {
-  const message = String(req.body?.message ?? '').trim();
-
-  if (!message) {
-    res.status(400).json(errorPayload('Debes enviar un mensaje en body.message.'));
-    return;
-  }
-
-  try {
-    await sendTelegramMessage(message);
-    res.json({ ok: true });
-  } catch (error) {
-    const details = error instanceof Error ? error.message : 'No se pudo enviar la notificación.';
-    res.status(500).json(errorPayload(details));
-  }
-});
-
-app.post('/api/telegram/set-webhook', async (req, res) => {
-  const url = String(req.body?.url ?? '').trim();
-
-  if (!url) {
-    res.status(400).json(errorPayload('Debes enviar URL en body.url.'));
-    return;
-  }
-
-  try {
-    await setTelegramWebhook(url);
-    res.json({ ok: true });
-  } catch (error) {
-    const details = error instanceof Error ? error.message : 'No se pudo configurar webhook.';
-    res.status(500).json(errorPayload(details));
-  }
-});
-
-app.post('/api/telegram/webhook', async (req, res) => {
-  try {
-    await processTelegramUpdate(req.body);
-  } catch {
-    // Respondemos 200 para evitar reintentos masivos de Telegram en caso de error.
-  }
-
-  res.json({ ok: true });
 });
 
 const distPath = path.join(process.cwd(), 'dist');

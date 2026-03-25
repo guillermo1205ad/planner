@@ -1,27 +1,30 @@
-# Planner (GitHub Pages Ready)
+# Planner (GitHub Pages)
 
 Planificador profesional de tres niveles:
 
-- Mensual
-- Semanal
-- Diario
-
-Modo actual: **100% frontend**, compatible con GitHub Pages.
+- Mensual: listado de tareas del mes.
+- Semanal: listado de tareas de la semana.
+- Diario: gestión detallada por secciones.
 
 ## Qué incluye
 
-- Gestión de tareas por día con secciones:
+- Secciones diarias:
   - Tareas para hoy
   - No olvidar
   - Tareas urgentes
   - Notas
 - Persistencia local en navegador (`localStorage`)
-- Integración Google Calendar desde frontend (OAuth en navegador + sincronización de tareas)
-- Integración Telegram en modo compartir (abre Telegram con texto prellenado)
+- Conexión y sincronización con Google Calendar (frontend)
+- Deploy automático a GitHub Pages con GitHub Actions
 
-## Limitación importante
+## Configuración `.env`
 
-Sin backend no existe webhook ni bot de Telegram automático (`/add`, `/remove`, `/list` en tiempo real desde servidor).
+Usa solo estas variables:
+
+```env
+VITE_GOOGLE_CLIENT_ID=tu_client_id.apps.googleusercontent.com
+VITE_GOOGLE_CALENDAR_ID=primary
+```
 
 ## Desarrollo local
 
@@ -30,33 +33,20 @@ npm install
 npm run dev
 ```
 
-## Configurar Google Calendar
+## Google Cloud
 
-1. Crea credenciales OAuth Web en Google Cloud.
-2. En la app, pega tu `Google Client ID`.
-3. Deja `Calendar ID` en `primary` (o usa otro si lo necesitas).
-4. Pulsa `Conectar Google`.
-5. En vista diaria usa `Sincronizar Google` o activa `Sincronizar Google al guardar`.
+En tu OAuth client agrega como **Authorized JavaScript origins**:
 
-En Google Cloud agrega como **Authorized JavaScript origin**:
-
-- `http://localhost:5173` (desarrollo)
-- `https://guillermo1205ad.github.io` (producción Pages)
-
-## Telegram en Pages
-
-- Usa `Mensaje de prueba` o `Compartir resumen`.
-- La app abre Telegram con el mensaje listo para enviar.
+- `http://localhost:5173`
+- `https://guillermo1205ad.github.io`
 
 ## Deploy a GitHub Pages
 
-Este repositorio incluye workflow de GitHub Actions para Pages.
-
-1. Sube el proyecto a la rama `main`.
-2. En GitHub, ve a `Settings > Pages`.
+1. Push a `main`.
+2. En GitHub: `Settings > Pages`.
 3. En `Build and deployment`, selecciona `GitHub Actions`.
 4. Cada push a `main` desplegará automáticamente.
 
-La URL final será:
+URL esperada:
 
 - `https://guillermo1205ad.github.io/planner/`
