@@ -1,9 +1,7 @@
 # Planner (GitHub Pages)
 
-Planificador profesional de tres niveles:
+Planificador profesional en modo diario:
 
-- Mensual: listado de tareas del mes.
-- Semanal: listado de tareas de la semana.
 - Diario: gestión detallada por secciones.
 
 ## Qué incluye

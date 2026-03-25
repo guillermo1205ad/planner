@@ -261,6 +261,10 @@ h1 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.single-picker {
+  grid-template-columns: 1fr;
+}
+
 .pickers label {
   display: grid;
   gap: 0.28rem;

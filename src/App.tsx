@@ -1,18 +1,11 @@
-import { format, parseISO } from 'date-fns';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { dateToInput, monthRangeFromInput, monthToInput, weekRangeFromInput, weekToInput } from './lib/date';
+import { dateToInput } from './lib/date';
 import { requestGoogleAccessToken, syncDayPlanToGoogleCalendar } from './lib/googleBrowser';
-import { getDayPlan, listRangeTasks, upsertDayPlan } from './lib/localStore';
-import { DayPlan, PlannedTaskItem, PlannerLevel, SectionKey } from './types';
+import { getDayPlan, upsertDayPlan } from './lib/localStore';
+import { DayPlan, SectionKey } from './types';
 
 const GOOGLE_CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 const GOOGLE_CALENDAR_ID = (import.meta.env.VITE_GOOGLE_CALENDAR_ID as string | undefined)?.trim() || 'primary';
-
-const levels: Array<{ id: PlannerLevel; title: string; subtitle: string }> = [
-  { id: 'month', title: 'Mensual', subtitle: 'Listado de tareas del mes' },
-  { id: 'week', title: 'Semanal', subtitle: 'Listado de tareas de la semana' },
-  { id: 'day', title: 'Diario', subtitle: 'Ejecución detallada del día' },
-];
 
 const sections: Array<{
   key: SectionKey;
@@ -51,13 +44,6 @@ const sections: Array<{
   },
 ];
 
-const sectionLabel: Record<SectionKey, string> = {
-  tasksForToday: 'Tarea de hoy',
-  dontForget: 'No olvidar',
-  urgentTasks: 'Urgente',
-  notes: 'Nota',
-};
-
 type BannerType = 'success' | 'error' | 'info';
 
 const clonePlan = (plan: DayPlan): DayPlan => ({
@@ -69,12 +55,9 @@ const clonePlan = (plan: DayPlan): DayPlan => ({
 
 function App() {
   const initialDate = useMemo(() => new Date(), []);
-  const [activeLevel, setActiveLevel] = useState<PlannerLevel>('month');
-  const [monthValue, setMonthValue] = useState(monthToInput(initialDate));
-  const [weekValue, setWeekValue] = useState(weekToInput(initialDate));
   const [dayValue, setDayValue] = useState(dateToInput(initialDate));
-
   const [dayPlan, setDayPlan] = useState<DayPlan>(clonePlan(getDayPlan(dayValue)));
+
   const [googleAccessToken, setGoogleAccessToken] = useState('');
   const [syncGoogleOnSave, setSyncGoogleOnSave] = useState(true);
   const [integrationBusy, setIntegrationBusy] = useState(false);
@@ -117,18 +100,6 @@ function App() {
     setDayPlan(clonePlan(getDayPlan(dayValue)));
   }, [dayValue, storeVersion]);
 
-  const monthRange = useMemo(() => monthRangeFromInput(monthValue), [monthValue]);
-  const weekRange = useMemo(() => weekRangeFromInput(weekValue), [weekValue]);
-
-  const monthTaskList = useMemo(
-    () => listRangeTasks(monthRange.start, monthRange.end),
-    [monthRange.end, monthRange.start, storeVersion],
-  );
-  const weekTaskList = useMemo(
-    () => listRangeTasks(weekRange.start, weekRange.end),
-    [weekRange.end, weekRange.start, storeVersion],
-  );
-
   const googleConfigured = GOOGLE_CLIENT_ID.length > 0;
   const googleConnected = googleAccessToken.length > 0;
 
@@ -157,10 +128,7 @@ function App() {
   };
 
   useEffect(() => {
-    if (!googleConfigured || googleConnected || integrationBusy) {
-      return;
-    }
-    if (silentConnectTried.current) {
+    if (!googleConfigured || googleConnected || integrationBusy || silentConnectTried.current) {
       return;
     }
 
@@ -244,70 +212,20 @@ function App() {
     setSavingDay(false);
   };
 
-  const jumpToDay = (date: string): void => {
-    setDayValue(date);
-    setActiveLevel('day');
-  };
-
-  const renderTaskList = (tasks: PlannedTaskItem[], emptyText: string) => {
-    if (tasks.length === 0) {
-      return <p className="loading">{emptyText}</p>;
-    }
-
-    return (
-      <ul className="task-feed">
-        {tasks.map((task, index) => (
-          <li key={`${task.date}-${task.section}-${task.text}-${index}`} className="task-item">
-            <div className="task-main">
-              <span className="task-date">{format(parseISO(`${task.date}T00:00:00`), 'dd MMM')}</span>
-              <span className="task-tag">{sectionLabel[task.section]}</span>
-              <p>{task.text}</p>
-            </div>
-            <button type="button" className="button button-ghost" onClick={() => jumpToDay(task.date)}>
-              Abrir día
-            </button>
-          </li>
-        ))}
-      </ul>
-    );
-  };
-
   return (
     <div className="app-shell">
       <header className="hero">
         <div>
           <p className="eyebrow">Planificador Profesional</p>
-          <h1>Mensual, semanal y diario en una sola operación.</h1>
-          <p className="lead">Planificación local y sincronización con Google Calendar.</p>
+          <h1>Planificación diaria en una sola operación.</h1>
+          <p className="lead">Organiza tu día y sincroniza con Google Calendar.</p>
         </div>
       </header>
 
       {banner ? <div className={`banner banner-${banner.type}`}>{banner.text}</div> : null}
 
       <section className="control-panel">
-        <div className="level-switch">
-          {levels.map((level) => (
-            <button
-              key={level.id}
-              type="button"
-              className={`level-button ${activeLevel === level.id ? 'active' : ''}`}
-              onClick={() => setActiveLevel(level.id)}
-            >
-              <span>{level.title}</span>
-              <small>{level.subtitle}</small>
-            </button>
-          ))}
-        </div>
-
-        <div className="pickers">
-          <label>
-            Mes
-            <input type="month" value={monthValue} onChange={(event) => setMonthValue(event.target.value)} />
-          </label>
-          <label>
-            Semana
-            <input type="week" value={weekValue} onChange={(event) => setWeekValue(event.target.value)} />
-          </label>
+        <div className="pickers single-picker">
           <label>
             Día
             <input type="date" value={dayValue} onChange={(event) => setDayValue(event.target.value)} />
@@ -316,113 +234,87 @@ function App() {
       </section>
 
       <section className="workspace-panel">
-        {activeLevel === 'month' ? (
-          <div className="view-block">
-            <div className="view-title">
-              <h2>Planificación mensual · {monthValue}</h2>
-              <p>Listado de todo lo pendiente para este mes.</p>
-            </div>
-            {renderTaskList(monthTaskList, 'No hay tareas registradas este mes.')}
+        <div className="view-block">
+          <div className="view-title">
+            <h2>Vista diaria · {dayValue}</h2>
+            <p>Organiza ejecución y seguimiento en bloques claros para operar con foco.</p>
           </div>
-        ) : null}
-
-        {activeLevel === 'week' ? (
-          <div className="view-block">
-            <div className="view-title">
-              <h2>Planificación semanal · {weekRange.start} a {weekRange.end}</h2>
-              <p>Listado de tareas pendientes para esta semana.</p>
+          <div className="day-actions-row">
+            <div className="day-toggle-group">
+              <p className="hint">
+                Google Calendar: {googleConnected ? 'Conectado' : googleConfigured ? 'No conectado' : 'Sin configurar'}
+              </p>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={syncGoogleOnSave}
+                  onChange={(event) => setSyncGoogleOnSave(event.target.checked)}
+                  disabled={!googleConnected}
+                />
+                Sincronizar Google al guardar
+              </label>
             </div>
-            {renderTaskList(weekTaskList, 'No hay tareas registradas esta semana.')}
-          </div>
-        ) : null}
-
-        {activeLevel === 'day' ? (
-          <div className="view-block">
-            <div className="view-title">
-              <h2>Vista diaria · {dayValue}</h2>
-              <p>Organiza ejecución y seguimiento en bloques claros para operar con foco.</p>
-            </div>
-            <div className="day-actions-row">
-              <div className="day-toggle-group">
-                <p className="hint">
-                  Google Calendar: {googleConnected ? 'Conectado' : googleConfigured ? 'No conectado' : 'Sin configurar'}
-                </p>
-                <label className="checkbox">
-                  <input
-                    type="checkbox"
-                    checked={syncGoogleOnSave}
-                    onChange={(event) => setSyncGoogleOnSave(event.target.checked)}
-                    disabled={!googleConnected}
-                  />
-                  Sincronizar Google al guardar
-                </label>
-              </div>
-              <div className="actions-inline">
-                {!googleConnected && googleConfigured ? (
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={() => void connectGoogle('consent')}
-                    disabled={integrationBusy || savingDay}
-                  >
-                    {integrationBusy ? 'Conectando...' : 'Conectar Google'}
-                  </button>
-                ) : null}
+            <div className="actions-inline">
+              {!googleConnected && googleConfigured ? (
                 <button
                   type="button"
                   className="button button-secondary"
-                  onClick={() => void syncDayWithGoogle(dayValue, dayPlan)}
-                  disabled={!googleConnected || savingDay}
+                  onClick={() => void connectGoogle('consent')}
+                  disabled={integrationBusy || savingDay}
                 >
-                  Sincronizar Google
+                  {integrationBusy ? 'Conectando...' : 'Conectar Google'}
                 </button>
-                <button type="button" className="button button-primary" onClick={() => void saveDay()} disabled={savingDay}>
-                  {savingDay ? 'Guardando...' : 'Guardar día'}
-                </button>
-              </div>
-            </div>
-            <div className="sections-grid">
-              {sections.map((section) => (
-                <article key={section.key} className={`section-card ${section.tone}`}>
-                  <h3>{section.title}</h3>
-                  <p>{section.helper}</p>
-                  <div className="compose-row">
-                    <input
-                      type="text"
-                      value={drafts[section.key]}
-                      onChange={(event) => setDrafts((previous) => ({ ...previous, [section.key]: event.target.value }))}
-                      placeholder={section.placeholder}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault();
-                          addItem(section.key);
-                        }
-                      }}
-                    />
-                    <button type="button" className="button button-ghost" onClick={() => addItem(section.key)}>
-                      Agregar
-                    </button>
-                  </div>
-                  <ul className="item-list">
-                    {dayPlan[section.key].length === 0 ? <li className="empty-line">Sin elementos aún.</li> : null}
-                    {dayPlan[section.key].map((item, index) => (
-                      <li key={`${section.key}-${index}`}>
-                        <input
-                          type="text"
-                          value={item}
-                          onChange={(event) => updateItem(section.key, index, event.target.value)}
-                        />
-                        <button type="button" className="button button-danger" onClick={() => removeItem(section.key, index)}>
-                          Quitar
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </article>
-              ))}
+              ) : null}
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => void syncDayWithGoogle(dayValue, dayPlan)}
+                disabled={!googleConnected || savingDay}
+              >
+                Sincronizar Google
+              </button>
+              <button type="button" className="button button-primary" onClick={() => void saveDay()} disabled={savingDay}>
+                {savingDay ? 'Guardando...' : 'Guardar día'}
+              </button>
             </div>
           </div>
-        ) : null}
+          <div className="sections-grid">
+            {sections.map((section) => (
+              <article key={section.key} className={`section-card ${section.tone}`}>
+                <h3>{section.title}</h3>
+                <p>{section.helper}</p>
+                <div className="compose-row">
+                  <input
+                    type="text"
+                    value={drafts[section.key]}
+                    onChange={(event) => setDrafts((previous) => ({ ...previous, [section.key]: event.target.value }))}
+                    placeholder={section.placeholder}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        addItem(section.key);
+                      }
+                    }}
+                  />
+                  <button type="button" className="button button-ghost" onClick={() => addItem(section.key)}>
+                    Agregar
+                  </button>
+                </div>
+                <ul className="item-list">
+                  {dayPlan[section.key].length === 0 ? <li className="empty-line">Sin elementos aún.</li> : null}
+                  {dayPlan[section.key].map((item, index) => (
+                    <li key={`${section.key}-${index}`}>
+                      <input type="text" value={item} onChange={(event) => updateItem(section.key, index, event.target.value)} />
+                      <button type="button" className="button button-danger" onClick={() => removeItem(section.key, index)}>
+                        Quitar
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </div>
       </section>
     </div>
   );
